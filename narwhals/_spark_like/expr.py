@@ -598,6 +598,32 @@ class SparkLikeExpr(LazyExpr["SparkLikeLazyFrame", "Column"]):
 
         return self._with_window_function(func)
 
+    def rolling_mean(self, window_size: int, *, min_samples: int, center: bool) -> Self:
+        if center:
+            half = (window_size - 1) // 2
+            remainder = (window_size - 1) % 2
+            start = self._Window().currentRow - half - remainder
+            end = self._Window().currentRow + half
+        else:
+            start = self._Window().currentRow - window_size + 1
+            end = self._Window().currentRow
+
+        def func(
+            _input: Column, partition_by: Sequence[str], order_by: Sequence[str]
+        ) -> Column:
+            window = (
+                self._Window()
+                .partitionBy(list(partition_by))
+                .orderBy([self._F.col(x).asc_nulls_first() for x in order_by])
+                .rowsBetween(start, end)
+            )
+            return self._F.when(
+                self._F.count(_input).over(window) >= min_samples,
+                self._F.mean(_input).over(window),
+            )
+
+        return self._with_window_function(func)
+
     @property
     def str(self: Self) -> SparkLikeExprStringNamespace:
         return SparkLikeExprStringNamespace(self)
